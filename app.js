@@ -2,12 +2,12 @@
 require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
-const ejs = require('ejs');
 const mongoose = require('mongoose');
 const session = require('express-session');
 const passport = require('passport');
 const passportLocalMongoose = require('passport-local-mongoose');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
+const FacebookStrategy = require('passport-facebook').Strategy;
 const findOrCreate = require('mongoose-findorcreate');
 
 
@@ -21,7 +21,9 @@ mongoose.set('useCreateIndex', true);
 const userSchema = new mongoose.Schema({
     name: String,
     password: String,
-    googleId:String
+    googleId:String,
+    facebookId:String,
+    secret:String
 });
 
 userSchema.plugin(passportLocalMongoose);
@@ -31,8 +33,6 @@ userSchema.plugin(findOrCreate);
 
 
 const User = mongoose.model('User', userSchema);
-
-
 
 passport.use(User.createStrategy());
 
@@ -47,11 +47,22 @@ passport.deserializeUser(function (id, done) {
     });
 });
 
+passport.use(new FacebookStrategy({
+    clientID: process.env.FB_CLIENT_ID,
+    clientSecret: process.env.FB_CLIENT_SECRET,
+    callbackURL: "http://localhost:3000/auth/facebook/secrets"
+  },
+  function(accessToken, refreshToken, profile, cb) {
+    User.findOrCreate({ facebookId: profile.id }, function (err, user) {
+      return cb(err, user);
+    });
+  }
+));
 
 passport.use(new GoogleStrategy({
         clientID: process.env.CLIENT_ID,
         clientSecret: process.env.CLIENT_SECRET,
-        callbackURL: "http://localhost:3000/auth/google/Secrets"
+        callbackURL: "http://localhost:3000/auth/google/secrets"
     },
     function (accessToken, refreshToken, profile, cb) {
         User.findOrCreate({
@@ -89,14 +100,24 @@ app.get('/auth/google',
         scope: ['profile']
     }));
 
-app.get('/auth/google/Secrets',
+app.get('/auth/google/secrets',
     passport.authenticate('google', {
         failureRedirect: '/login'
     }),
     function (req, res) {
         // Successful authentication, redirect home.
         res.redirect('/secrets');
-    });
+});
+
+app.get('/auth/facebook',
+  passport.authenticate('facebook'));
+
+app.get('/auth/facebook/secrets',
+  passport.authenticate('facebook', { failureRedirect: '/login' }),
+  function(req, res) {
+    // Successful authentication, redirect home.
+    res.redirect('/secrets');
+});
 
 app.get('/login', function (req, res) {
     res.render('login');
@@ -123,16 +144,28 @@ app.post('/register', function (req, res) {
 
 app.get('/secrets', function (req, res) {
     if (req.isAuthenticated()) {
-        res.render("secrets");
+        console.log('hehehe');
+        User.find({"secret":{$ne:null}},function(err,foundUsers){
+            console.log(foundUsers);
+            if (err){
+                console.log(err);
+            } else {
+                res.render("secrets",{Users:foundUsers});
+            }
+        })
     } else {
         res.redirect("/login");
     }
 });
 
 app.get('/logout', function (req, res) {
-    req.logout();
-    res.redirect('/');
-})
+    if(!req.user.facebookId){
+        res.redirect('https://www.facebook.com/logout.php?next='+'http://locahost:3000'+'/logout&access_token='+req.body['accessToken']);
+    } else {
+        req.logout();
+        res.redirect('/');
+    }
+});
 
 app.post('/login', function (req, res) {
     const user = new User({
@@ -150,6 +183,27 @@ app.post('/login', function (req, res) {
             });
         }
     })
+});
+
+app.get('/submit',function(req,res){
+    if (req.isAuthenticated()) {
+        res.render('submit');
+    } else {
+        res.redirect("/login");
+    }
+});
+
+app.post('/submit',function(req,res){
+    console.log(req.secret);
+    User.findByIdAndUpdate(req.user.id,{secret:req.body.secret},function(err){
+        if(err){
+            console.log(err);
+        } else {
+            console.log("successfully update")
+        }
+    });
+
+    res.redirect('/secrets');
 });
 
 app.listen(process.env.PORT || 3000, function () {
