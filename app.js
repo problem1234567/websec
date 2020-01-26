@@ -4,10 +4,11 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const ejs = require('ejs');
 const mongoose = require('mongoose');
-
 const session = require('express-session');
 const passport = require('passport');
 const passportLocalMongoose = require('passport-local-mongoose');
+const GoogleStrategy = require('passport-google-oauth20').Strategy;
+const findOrCreate = require('mongoose-findorcreate');
 
 
 mongoose.connect('mongodb://localhost:27017/userDB', {
@@ -19,15 +20,18 @@ mongoose.set('useCreateIndex', true);
 
 const userSchema = new mongoose.Schema({
     name: String,
-    password: String
+    password: String,
+    googleId:String
 });
 
 userSchema.plugin(passportLocalMongoose);
+userSchema.plugin(findOrCreate);
 
 // userSchema.plugin(encrypt,{secret:process.env.SECRET, encryptedFields:['password']});
 
 
 const User = mongoose.model('User', userSchema);
+
 
 
 passport.use(User.createStrategy());
@@ -42,6 +46,21 @@ passport.deserializeUser(function (id, done) {
         done(err, user);
     });
 });
+
+
+passport.use(new GoogleStrategy({
+        clientID: process.env.CLIENT_ID,
+        clientSecret: process.env.CLIENT_SECRET,
+        callbackURL: "http://localhost:3000/auth/google/Secrets"
+    },
+    function (accessToken, refreshToken, profile, cb) {
+        User.findOrCreate({
+            googleId: profile.id
+        }, function (err, user) {
+            return cb(err, user);
+        });
+    }
+));
 
 
 const app = express();
@@ -64,6 +83,20 @@ app.use(passport.session());
 app.get('/', function (req, res) {
     res.render('home');
 });
+
+app.get('/auth/google',
+    passport.authenticate('google', {
+        scope: ['profile']
+    }));
+
+app.get('/auth/google/Secrets',
+    passport.authenticate('google', {
+        failureRedirect: '/login'
+    }),
+    function (req, res) {
+        // Successful authentication, redirect home.
+        res.redirect('/secrets');
+    });
 
 app.get('/login', function (req, res) {
     res.render('login');
@@ -96,7 +129,7 @@ app.get('/secrets', function (req, res) {
     }
 });
 
-app.get('/logout',function(req,res){
+app.get('/logout', function (req, res) {
     req.logout();
     res.redirect('/');
 })
@@ -119,6 +152,6 @@ app.post('/login', function (req, res) {
     })
 });
 
-app.listen(process.env.PORT || 3001, function () {
+app.listen(process.env.PORT || 3000, function () {
     console.log("server running....");
-})
+});
